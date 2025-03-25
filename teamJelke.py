@@ -52,15 +52,19 @@ class AttackingDefenderAgentTop(CaptureAgent):
 
   def registerInitialState(self, gameState):
     
-    self.simulation_time = 0.2
-    self.max_depth = 10
-    
+    self.simulation_time = 0.21
+    self.max_depth = 3
+    self.exploration = 0   
     CaptureAgent.registerInitialState(self, gameState)
     
     self.start = gameState.getAgentPosition(self.index)
     self.food_carrying = 0
     self.max_food_to_carry = 1
 
+    self.action_values = {}
+    self.action_visits = {}
+    self.rave_values = {}
+    self.rave_visits = {}
 
   def chooseAction(self, gameState):
     start_time = time.time()
@@ -69,18 +73,19 @@ class AttackingDefenderAgentTop(CaptureAgent):
       self.food_carrying = 0
     
     actions = gameState.getLegalActions(self.index)
+    print(actions)
     simulations = {action: 0 for action in actions}
     scores = {action: 0 for action in actions}
 
-    for action in actions:
-        next_state = gameState.generateSuccessor(self.index, action)
-        if len(self.getFood(gameState).asList()) > len(self.getFood(next_state).asList()):
-            scores[action] += 5000
+    # for action in actions:
+    #     next_state = gameState.generateSuccessor(self.index, action)
+    #     if len(self.getFood(gameState).asList()) > len(self.getFood(next_state).asList()):
+    #         scores[action] += 1000
     
     while time.time() - start_time < self.simulation_time:
       action = random.choice(actions)
+
       next_state = gameState.generateSuccessor(self.index, action)
-      
       sim_food_carrying = self.food_carrying
       if len(self.getFood(gameState).asList()) > len(self.getFood(next_state).asList()):
           sim_food_carrying += 1
@@ -88,19 +93,33 @@ class AttackingDefenderAgentTop(CaptureAgent):
       reward = self.simulate(next_state, depth=0, food_carrying=sim_food_carrying)
       simulations[action] += 1
       scores[action] += reward
-    
-    best_action = max(actions, key=lambda a: scores[a] / (simulations[a] + 1e-6))
+      self.updateRAVE(action, reward)
 
+    print("\nAction Analysis:")
+    for action in actions:
+        direct_score = scores[action] / (simulations[action] + 1e-6)
+        rave_value = self.rave_values.get(action, 0) / (self.rave_visits.get(action, 1))
+        combined_value = self.getCombinedValue(action, simulations[action], scores[action])
+        
+        print(f"Action: {action}")
+        print(f"  Direct Score: {direct_score:.2f}")
+        print(f"  Simulations: {simulations[action]}")
+        print(f"  RAVE Value: {rave_value:.2f}")
+        print(f"  Combined Value: {combined_value:.2f}")
+    best_action = max(actions, key=lambda a: self.getCombinedValue(a, simulations[a], scores[a]))
+    
     successor = gameState.generateSuccessor(self.index, best_action)
     if len(self.getFood(gameState).asList()) > len(self.getFood(successor).asList()):
         self.food_carrying += 1
     
     print(f"Best action: {best_action}, Score: {scores[best_action] / (simulations[best_action] + 1e-6)}")
+    if best_action not in actions:
+      return random.choice(actions)
     return best_action
   
   def simulate(self, gameState, depth, food_carrying):
         if depth >= self.max_depth or gameState.isOver():
-            return self.evaluate(gameState, food_carrying)# * (0.9 ** depth)
+            return self.evaluate(gameState, food_carrying)
 
         actions = gameState.getLegalActions(self.index)
         
@@ -118,168 +137,49 @@ class AttackingDefenderAgentTop(CaptureAgent):
             score = self.evaluate_action(gameState, action, food_carrying, sim_food_carrying)
             action_scores.append((action, score, sim_food_carrying))
         
-        total_score = sum(max(1, score) for _, score, _ in action_scores)
-        probabilities = [max(1, score) / total_score for _, score, _ in action_scores]
-        
-        chosen_idx = random.choices(range(len(action_scores)), weights=probabilities)[0]
+        chosen_idx = max(range(len(action_scores)), key=lambda i: action_scores[i][1])
+
         action, _, new_food_carrying = action_scores[chosen_idx]
         
         next_state = gameState.generateSuccessor(self.index, action)
     
         all_indexes = [0, 1, 2, 3]
-        all_indexes.remove(self.index)
+        if self.red:
+          all_indexes = [1, 3]
+        else:
+          all_indexes = [1, 3]
+        #all_indexes.remove(self.index)
+        
         
         for agent in all_indexes:
-            agent_actions = next_state.getLegalActions(agent)
-            if agent_actions:
-                agent_action = random.choice(agent_actions)
-                next_state = next_state.generateSuccessor(agent, agent_action)
+            if next_state.isOver():
+                break
+                    
+            next_state = next_state.generateSuccessor(agent, random.choice(gameState.getLegalActions(agent)))
+                
         return self.simulate(next_state, depth + 1, new_food_carrying)
       
+  def getCombinedValue(self, action, num_simulations, score):
+        rave_value = self.rave_values.get(action, 0)
+        rave_visits = self.rave_visits.get(action, 0)
+
+        combined_value = (1 - self.exploration) * (score / (num_simulations + 1e-6)) + \
+                         self.exploration * (rave_value / (rave_visits + 1e-6))
+        return combined_value
+    
+  def updateRAVE(self, action, reward):
+        if action not in self.rave_values:
+            self.rave_values[action] = 0
+            self.rave_visits[action] = 0
+
+        self.rave_values[action] += reward
+        self.rave_visits[action] += 1
+        
   def evaluate_action(self, gameState, action, current_food_carrying, next_food_carrying):
       successor = gameState.generateSuccessor(self.index, action)
       
-      if next_food_carrying > current_food_carrying:
-          return 1000
-      
-      return self.evaluate(successor, next_food_carrying)
-      
-  def evaluate(self, gameState, food_carrying=None):
-
-    if food_carrying is None:
-        food_carrying = self.food_carrying
-        
-    position = gameState.getAgentPosition(self.index)
-    #food_list = self.getFood(gameState).asList()
-    
-    score = 0
-    
-    if food_carrying >= self.max_food_to_carry:
-      dist_to_start = self.getMazeDistance(position, self.start)
-      return -(10 * dist_to_start)
-
-    opp = self.getOpponents(gameState)
-    enemies = [gameState.getAgentPosition(i) for i in opp]
-    enemy_pacmans = [en for en in opp if gameState.getAgentState(en).isPacman]
-
-    for en in self.getOpponents(gameState):
-      if self.red:
-        # print(f"{gameState.getAgentPosition(en)[0]}")
-        # print(position[0])
-        if gameState.getAgentPosition(en)[0] == 30 and position[0] != 1:
-          score += 1000
-      else:
-        if gameState.getAgentPosition(en)[0] == 1 and position[0] != 30:
-          score += 1000
-    if (enemy_pacmans):
-      closest_pacman = min(self.getMazeDistance(position, gameState.getAgentPosition(ep)) for ep in enemy_pacmans)
-      score -= 5 * closest_pacman
-    else:
-      closest_enemy = min(self.getMazeDistance(position, enemy) for enemy in enemies)
-      score -= closest_enemy
-    
-    if gameState.getAgentState(self.index).isPacman:
-      score -= 100
-            
-    return score
-
-
-
-class AttackingDefenderAgentBottom(CaptureAgent):
-
-  def registerInitialState(self, gameState):
-    
-    self.simulation_time = 0.1
-    self.max_depth = 7
-    
-    CaptureAgent.registerInitialState(self, gameState)
-    
-    self.start = gameState.getAgentPosition(self.index)
-    self.food_carrying = 0
-    self.max_food_to_carry = 1
-
-
-  def chooseAction(self, gameState):
-    
-    start_time = time.time()
-    
-    if not gameState.getAgentState(self.index).isPacman:
-      self.food_carrying = 0
-    
-    actions = gameState.getLegalActions(self.index)
-    
-    simulations = {action: 0 for action in actions}
-    scores = {action: 0 for action in actions}
-
-    for action in actions:
-        next_state = gameState.generateSuccessor(self.index, action)
-        if len(self.getFood(gameState).asList()) > len(self.getFood(next_state).asList()):
-            scores[action] += 5000
-    
-    while time.time() - start_time < self.simulation_time:
-      action = random.choice(actions)
-      next_state = gameState.generateSuccessor(self.index, action)
-      
-      sim_food_carrying = self.food_carrying
-      if len(self.getFood(gameState).asList()) > len(self.getFood(next_state).asList()):
-          sim_food_carrying += 1
-      
-      reward = self.simulate(next_state, depth=0, food_carrying=sim_food_carrying)
-      simulations[action] += 1
-      scores[action] += reward
-    
-    best_action = max(actions, key=lambda a: scores[a] / (simulations[a] + 1e-6))
-
-    successor = gameState.generateSuccessor(self.index, best_action)
-    if len(self.getFood(gameState).asList()) > len(self.getFood(successor).asList()):
-        self.food_carrying += 1
-    
-    print(f"Best action: {best_action}, Score: {scores[best_action] / (simulations[best_action] + 1e-6)}")
-    return best_action
-  
-  def simulate(self, gameState, depth, food_carrying):
-        if depth >= self.max_depth or gameState.isOver():
-            return self.evaluate(gameState, food_carrying) * (0.9 ** depth)
-
-        actions = gameState.getLegalActions(self.index)
-        
-        if not actions:
-            return self.evaluate(gameState, food_carrying)
-        
-        action_scores = []
-        for action in actions:
-            next_state = gameState.generateSuccessor(self.index, action)
-            
-            sim_food_carrying = food_carrying
-            if len(self.getFood(gameState).asList()) > len(self.getFood(next_state).asList()):
-                sim_food_carrying += 1
-                
-            score = self.evaluate_action(gameState, action, food_carrying, sim_food_carrying)
-            action_scores.append((action, score, sim_food_carrying))
-        
-        total_score = sum(max(1, score) for _, score, _ in action_scores)
-        probabilities = [max(1, score) / total_score for _, score, _ in action_scores]
-        
-        chosen_idx = random.choices(range(len(action_scores)), weights=probabilities)[0]
-        action, _, new_food_carrying = action_scores[chosen_idx]
-        
-        next_state = gameState.generateSuccessor(self.index, action)
-        
-        opponent_indices = self.getOpponents(gameState)
-    
-        for opponent in opponent_indices:
-            opponent_actions = next_state.getLegalActions(opponent)
-            if opponent_actions:
-                opponent_action = random.choice(opponent_actions)  # Assume random opponent behavior
-                next_state = next_state.generateSuccessor(opponent, opponent_action)
-
-        return self.simulate(next_state, depth + 2, new_food_carrying)
-      
-  def evaluate_action(self, gameState, action, current_food_carrying, next_food_carrying):
-      successor = gameState.generateSuccessor(self.index, action)
-      
-      if next_food_carrying > current_food_carrying:
-          return 15000
+      # if next_food_carrying > current_food_carrying:
+      #     return 1000
       
       return self.evaluate(successor, next_food_carrying)
       
@@ -293,38 +193,48 @@ class AttackingDefenderAgentBottom(CaptureAgent):
     
     score = 0
     
+    
     if food_carrying >= self.max_food_to_carry:
       dist_to_start = self.getMazeDistance(position, self.start)
-      return 10000 - (10 * dist_to_start)
-    
-    # score += 2000 * food_carrying
-    
-    # if len(food_list) > 2:
-    #   min_food_dist = min(self.getMazeDistance(position, food) for food in food_list)
-    #   score -= 10 * min_food_dist
-    
-    # else:
-    #   score += 1000 - self.getMazeDistance(position, self.start)
-      
+      return -(10 * dist_to_start)
+
     opp = self.getOpponents(gameState)
     enemies = [gameState.getAgentPosition(i) for i in opp]
     enemy_pacmans = [en for en in opp if gameState.getAgentState(en).isPacman]
 
-    for en in self.getOpponents(gameState):
-      if self.red:
-        if gameState.getAgentPosition(en)[0] == 30 and position[0] != 0:
-          score += 1000
-      else:
-        if gameState.getAgentPosition(en)[0] == 0 and position[0] != 30:
-          score += 1000
-    if (enemy_pacmans):
-      closest_pacman = min(self.getMazeDistance(position, gameState.getAgentPosition(ep)) for ep in enemy_pacmans)
-      score -= 3 * closest_pacman
+    # for en in self.getOpponents(gameState):
+    #   if self.red:
+    #     if gameState.getAgentPosition(en)[0] == 30 and position[0] != 1:
+    #       score += 100
+    #   else:
+    #     if gameState.getAgentPosition(en)[0] == 1 and position[0] != 30:
+    #       score += 100
+          
+    if enemy_pacmans:
+      closest_pacman = min(enemy_pacmans, key=lambda ep: self.getMazeDistance(position, gameState.getAgentPosition(ep)))
+      distance_to_pacman = self.getMazeDistance(position, gameState.getAgentPosition(closest_pacman))
+      score += 150 -  3 * distance_to_pacman
+
     else:
       closest_enemy = min(self.getMazeDistance(position, enemy) for enemy in enemies)
-      score -= closest_enemy
+      score += 50 - closest_enemy
     
     if gameState.getAgentState(self.index).isPacman:
-      score -= 100
-            
+      score -= 10
+      
+    closest_food = min(food_list, key=lambda food: self.getMazeDistance(position, food))
+    closest_enemy_to_closest_food = min(self.getMazeDistance(closest_food, enemy) for enemy in enemies)
+    distance_to_closest_food = self.getMazeDistance(position, closest_food)
+    if 2 * distance_to_closest_food < closest_enemy_to_closest_food:
+      print("CLOSE TO FOOD")
+      score -= 20 * distance_to_closest_food
+    
+    # capsules = self.getCapsules(gameState)
+    # if capsules:
+    #     capsule = capsules[0]
+    #     closest_enemy_to_capsule = min(self.getMazeDistance(capsule, enemy) for enemy in enemies)
+    #     distance_to_capsule = self.getMazeDistance(position, capsule)
+    #     if distance_to_capsule < closest_enemy_to_capsule:
+    #         score -= 30 * distance_to_capsule
+    
     return score
