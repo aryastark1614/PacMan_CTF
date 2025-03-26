@@ -52,19 +52,12 @@ class AttackingDefenderAgentTop(CaptureAgent):
 
   def registerInitialState(self, gameState):
     
-    self.simulation_time = 0.21
-    self.max_depth = 3
-    self.exploration = 0   
+    self.simulation_time = 0.01
     CaptureAgent.registerInitialState(self, gameState)
     
     self.start = gameState.getAgentPosition(self.index)
     self.food_carrying = 0
     self.max_food_to_carry = 1
-
-    self.action_values = {}
-    self.action_visits = {}
-    self.rave_values = {}
-    self.rave_visits = {}
 
   def chooseAction(self, gameState):
     start_time = time.time()
@@ -77,112 +70,27 @@ class AttackingDefenderAgentTop(CaptureAgent):
     simulations = {action: 0 for action in actions}
     scores = {action: 0 for action in actions}
 
-    # for action in actions:
-    #     next_state = gameState.generateSuccessor(self.index, action)
-    #     if len(self.getFood(gameState).asList()) > len(self.getFood(next_state).asList()):
-    #         scores[action] += 1000
+    for action in actions:
+        next_state = gameState.generateSuccessor(self.index, action)
+        if len(self.getFood(gameState).asList()) > len(self.getFood(next_state).asList()):
+            scores[action] += 1000
     
-    while time.time() - start_time < self.simulation_time:
-      action = random.choice(actions)
-
+    for action in actions:
+        
       next_state = gameState.generateSuccessor(self.index, action)
       sim_food_carrying = self.food_carrying
       if len(self.getFood(gameState).asList()) > len(self.getFood(next_state).asList()):
           sim_food_carrying += 1
       
-      reward = self.simulate(next_state, depth=0, food_carrying=sim_food_carrying)
-      simulations[action] += 1
+      reward = self.evaluate(next_state, food_carrying=sim_food_carrying)
       scores[action] += reward
-      self.updateRAVE(action, reward)
 
-    print("\nAction Analysis:")
-    for action in actions:
-        direct_score = scores[action] / (simulations[action] + 1e-6)
-        rave_value = self.rave_values.get(action, 0) / (self.rave_visits.get(action, 1))
-        combined_value = self.getCombinedValue(action, simulations[action], scores[action])
-        
-        print(f"Action: {action}")
-        print(f"  Direct Score: {direct_score:.2f}")
-        print(f"  Simulations: {simulations[action]}")
-        print(f"  RAVE Value: {rave_value:.2f}")
-        print(f"  Combined Value: {combined_value:.2f}")
-    best_action = max(actions, key=lambda a: self.getCombinedValue(a, simulations[a], scores[a]))
+    best_action = max(actions, key=lambda a: scores[a])
     
-    successor = gameState.generateSuccessor(self.index, best_action)
-    if len(self.getFood(gameState).asList()) > len(self.getFood(successor).asList()):
-        self.food_carrying += 1
-    
-    print(f"Best action: {best_action}, Score: {scores[best_action] / (simulations[best_action] + 1e-6)}")
     if best_action not in actions:
       return random.choice(actions)
     return best_action
   
-  def simulate(self, gameState, depth, food_carrying):
-        if depth >= self.max_depth or gameState.isOver():
-            return self.evaluate(gameState, food_carrying)
-
-        actions = gameState.getLegalActions(self.index)
-        
-        if not actions:
-            return self.evaluate(gameState, food_carrying)
-        
-        action_scores = []
-        for action in actions:
-            next_state = gameState.generateSuccessor(self.index, action)
-            
-            sim_food_carrying = food_carrying
-            if len(self.getFood(gameState).asList()) > len(self.getFood(next_state).asList()):
-                sim_food_carrying += 1
-                
-            score = self.evaluate_action(gameState, action, food_carrying, sim_food_carrying)
-            action_scores.append((action, score, sim_food_carrying))
-        
-        chosen_idx = max(range(len(action_scores)), key=lambda i: action_scores[i][1])
-
-        action, _, new_food_carrying = action_scores[chosen_idx]
-        
-        next_state = gameState.generateSuccessor(self.index, action)
-    
-        all_indexes = [0, 1, 2, 3]
-        if self.red:
-          all_indexes = [1, 3]
-        else:
-          all_indexes = [1, 3]
-        #all_indexes.remove(self.index)
-        
-        
-        for agent in all_indexes:
-            if next_state.isOver():
-                break
-                    
-            next_state = next_state.generateSuccessor(agent, random.choice(gameState.getLegalActions(agent)))
-                
-        return self.simulate(next_state, depth + 1, new_food_carrying)
-      
-  def getCombinedValue(self, action, num_simulations, score):
-        rave_value = self.rave_values.get(action, 0)
-        rave_visits = self.rave_visits.get(action, 0)
-
-        combined_value = (1 - self.exploration) * (score / (num_simulations + 1e-6)) + \
-                         self.exploration * (rave_value / (rave_visits + 1e-6))
-        return combined_value
-    
-  def updateRAVE(self, action, reward):
-        if action not in self.rave_values:
-            self.rave_values[action] = 0
-            self.rave_visits[action] = 0
-
-        self.rave_values[action] += reward
-        self.rave_visits[action] += 1
-        
-  def evaluate_action(self, gameState, action, current_food_carrying, next_food_carrying):
-      successor = gameState.generateSuccessor(self.index, action)
-      
-      # if next_food_carrying > current_food_carrying:
-      #     return 1000
-      
-      return self.evaluate(successor, next_food_carrying)
-      
   def evaluate(self, gameState, food_carrying=None):
 
     if food_carrying is None:
