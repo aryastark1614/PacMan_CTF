@@ -79,12 +79,14 @@ class AttackingDefenderAgentTop(CaptureAgent):
           sim_food_carrying += 1
           self.food_carrying += 1
           scores[action] += 10000
+          
+      if len(self.getCapsules(gameState)) > len(self.getCapsules(next_state)):
+          scores[action] += 100000
       
       reward = self.evaluate(next_state, food_carrying=sim_food_carrying)
       scores[action] += reward
-
+    print(scores)
     best_action = max(actions, key=lambda a: scores[a])
-    print(scores[best_action])
     
     if best_action not in actions:
       return random.choice(actions)
@@ -108,6 +110,7 @@ class AttackingDefenderAgentTop(CaptureAgent):
     opp = self.getOpponents(gameState)
     enemies = [gameState.getAgentPosition(i) for i in opp]
     enemy_pacmans = [en for en in opp if gameState.getAgentState(en).isPacman]
+    
 
     for en in self.getOpponents(gameState):
       if self.red:
@@ -125,7 +128,7 @@ class AttackingDefenderAgentTop(CaptureAgent):
         if gameState.getAgentPosition(en)[0] != 1 and position[0] == 30:
           score -= 1000
           
-    if enemy_pacmans:
+    if enemy_pacmans and gameState.getAgentState(self.index).scaredTimer == 0:
       closest_pacman = min(enemy_pacmans, key=lambda ep: self.getMazeDistance(position, gameState.getAgentPosition(ep)))
       distance_to_pacman = self.getMazeDistance(position, gameState.getAgentPosition(closest_pacman))
       score += 150 -  3 * distance_to_pacman
@@ -137,30 +140,45 @@ class AttackingDefenderAgentTop(CaptureAgent):
     if gameState.getAgentState(self.index).isPacman:
       score -= 10
       
-    closest_food = min(food_list, key=lambda food: self.getMazeDistance(position, food))
-    closest_enemy_to_closest_food = min(self.getMazeDistance(closest_food, enemy) for enemy in enemies)
-    distance_to_closest_food = self.getMazeDistance(position, closest_food)
-    if 2 * distance_to_closest_food < closest_enemy_to_closest_food:
-      print("CLOSE TO FOOD")
-      score -= 20 * distance_to_closest_food
-    
     capsules = self.getCapsules(gameState)
     if capsules:
         capsule = capsules[0]
         closest_enemy_to_capsule = min(self.getMazeDistance(capsule, enemy) for enemy in enemies)
         distance_to_capsule = self.getMazeDistance(position, capsule)
         if distance_to_capsule < closest_enemy_to_capsule:
-            score -= 10 * distance_to_capsule
+            print("CLOSE TO CAPSULE")
+            return 10000 - ( 10 * distance_to_capsule)
+        
+        
+    closest_food = min(food_list, key=lambda food: self.getMazeDistance(position, food))
+    closest_enemy_to_closest_food = min(self.getMazeDistance(closest_food, enemy) for enemy in enemies)
+    distance_to_closest_food = self.getMazeDistance(position, closest_food)
+    if 2 * distance_to_closest_food < closest_enemy_to_closest_food or gameState.getAgentState(((self.index + 1) % 4)).scaredTimer > 0:
+      print("CLOSE TO FOOD")
+      return 10000 - (10 * distance_to_closest_food)
+    
+    
             
-    #Try to have one agent go to the other side of the board
-    get_teammate = self.getTeam(gameState)
-    teammate = get_teammate[0] if get_teammate[0] != self.index else get_teammate[1]
-    teammate_position = gameState.getAgentPosition(teammate)
-    score += self.getMazeDistance(position, teammate_position)
+    #Check if teammate is one away from enemy, if so, go near the other enemy
+    teammate_indices = [i for i in self.getTeam(gameState) if i != self.index]
+    teammate_positions = [gameState.getAgentPosition(i) for i in teammate_indices]
+    enemies_positions = [gameState.getAgentPosition(i) for i in self.getOpponents(gameState) if gameState.getAgentPosition(i) is not None]
+
+    for teammate_position in teammate_positions:
+        for enemy_position in enemies_positions:
+            if self.getMazeDistance(teammate_position, enemy_position) == 1:
+                #Try to have one agent go to the other side of the board
+                get_teammate = self.getTeam(gameState)
+                teammate = get_teammate[0] if get_teammate[0] != self.index else get_teammate[1]
+                teammate_position = gameState.getAgentPosition(teammate)
+                score += 0.5 * self.getMazeDistance(position, teammate_position)
+    
     
     
 
     return score
+
+
 
 class AttackingDefenderAgentBottom(CaptureAgent):
 
@@ -193,12 +211,13 @@ class AttackingDefenderAgentBottom(CaptureAgent):
           sim_food_carrying += 1
           self.food_carrying += 1
           scores[action] += 10000
-      
+      if len(self.getCapsules(gameState)) > len(self.getCapsules(next_state)):
+          scores[action] += 100000
+          
       reward = self.evaluate(next_state, food_carrying=sim_food_carrying)
       scores[action] += reward
-
+    print(scores)
     best_action = max(actions, key=lambda a: scores[a])
-    print(scores[best_action])
     
     if best_action not in actions:
       return random.choice(actions)
@@ -217,7 +236,7 @@ class AttackingDefenderAgentBottom(CaptureAgent):
     
     if food_carrying >= self.max_food_to_carry:
       dist_to_start = self.getMazeDistance(position, self.start)
-      return 100000-(10 * dist_to_start)
+      return 1000 - (dist_to_start)
 
     opp = self.getOpponents(gameState)
     enemies = [gameState.getAgentPosition(i) for i in opp]
@@ -238,39 +257,49 @@ class AttackingDefenderAgentBottom(CaptureAgent):
       else:
         if gameState.getAgentPosition(en)[0] != 1 and position[0] == 30:
           score -= 1000
-          
-    if enemy_pacmans:
+    print(f"ScaredTimer self: {gameState.getAgentState(self.index).scaredTimer}")
+    if enemy_pacmans and gameState.getAgentState(self.index).scaredTimer == 0:
       closest_pacman = min(enemy_pacmans, key=lambda ep: self.getMazeDistance(position, gameState.getAgentPosition(ep)))
       distance_to_pacman = self.getMazeDistance(position, gameState.getAgentPosition(closest_pacman))
       score += 150 -  3 * distance_to_pacman
 
     else:
       closest_enemy = min(self.getMazeDistance(position, enemy) for enemy in enemies)
-      score += 50 - closest_enemy
+      score += 100 - closest_enemy
     
     if gameState.getAgentState(self.index).isPacman:
       score -= 10
       
-    closest_food = min(food_list, key=lambda food: self.getMazeDistance(position, food))
-    closest_enemy_to_closest_food = min(self.getMazeDistance(closest_food, enemy) for enemy in enemies)
-    distance_to_closest_food = self.getMazeDistance(position, closest_food)
-    if 2 * distance_to_closest_food < closest_enemy_to_closest_food:
-      print("CLOSE TO FOOD")
-      score -= 20 * distance_to_closest_food
-    
     capsules = self.getCapsules(gameState)
     if capsules:
         capsule = capsules[0]
         closest_enemy_to_capsule = min(self.getMazeDistance(capsule, enemy) for enemy in enemies)
         distance_to_capsule = self.getMazeDistance(position, capsule)
         if distance_to_capsule < closest_enemy_to_capsule:
-            score -= 10 * distance_to_capsule
+            print("CLOSE TO CAPSULE")
+            return 10000 - ( 10 * distance_to_capsule)
+        
+        
+    closest_food = min(food_list, key=lambda food: self.getMazeDistance(position, food))
+    closest_enemy_to_closest_food = min(self.getMazeDistance(closest_food, enemy) for enemy in enemies)
+    distance_to_closest_food = self.getMazeDistance(position, closest_food)
+    if 2 * distance_to_closest_food < closest_enemy_to_closest_food or gameState.getAgentState(((self.index + 1) % 4)).scaredTimer > 0:
+      print("CLOSE TO FOOD")
+      return 10000 - (10 * distance_to_closest_food)
             
-    #Try to have one agent go to the other side of the board
-    # get_teammate = self.getTeam(gameState)
-    # teammate = get_teammate[0] if get_teammate[0] != self.index else get_teammate[1]
-    # teammate_position = gameState.getAgentPosition(teammate)
-    # score += self.getMazeDistance(position, teammate_position)
+            
+    #Check if teammate is one away from enemy, if so, go away from teammate
+    teammate_indices = [i for i in self.getTeam(gameState) if i != self.index]
+    teammate_positions = [gameState.getAgentPosition(i) for i in teammate_indices]
+    enemies_positions = [gameState.getAgentPosition(i) for i in self.getOpponents(gameState) if gameState.getAgentPosition(i) is not None]
+    for teammate_position in teammate_positions:
+        for enemy_position in enemies_positions:
+            if self.getMazeDistance(teammate_position, enemy_position) == 1:
+                get_teammate = self.getTeam(gameState)
+                teammate = get_teammate[0] if get_teammate[0] != self.index else get_teammate[1]
+                teammate_position = gameState.getAgentPosition(teammate)
+                score += 2 * self.getMazeDistance(position, teammate_position)
+
     
     
 
