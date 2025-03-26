@@ -74,15 +74,21 @@ class Agents(CaptureAgent):
     '''
     Your initialization code goes here, if you need any.
     '''
-    self.simulation_time = 0.3
-    self.max_depth = 1000
+    self.simulation_time = 0.4
+    self.max_depth = 60
+    self.treelevel = 0
+    self.state_hash_mapping = {}
+
+    self.current_root = None
+    self.current_node = None
+    self.sim_gameState = None
+    self.reuse = 0
 
     self.start = gameState.getAgentPosition(self.index)
-    self.child_state = {}
-    self.current_root = mcts.MCTSNode(gameState)
     self.numberOfAgents = gameState.getNumAgents()
     self.me = self.index
     self.mate = self.getTeam(gameState)[1] if self.getTeam(gameState)[0] == self.index else self.getTeam(gameState)[0]
+    self.max_food_carry = 2
 
   def get_index(self, start = 0, n = 4):
     while True:
@@ -101,6 +107,64 @@ class Agents(CaptureAgent):
       return True
     return False
 
+  def get_state_hash(self, gameState):
+    positions = tuple(gameState.getAgentPosition(i) for i in range(gameState.getNumAgents()))
+    return hash(positions)
+
+  def getRoot(self, gameState):
+    found_existing = False
+    new_state_hash = self.get_state_hash(gameState)
+    for node in self.state_hash_mapping.values():
+      if new_state_hash == self.get_state_hash(node.state):
+        found_existing = True
+        self.current_root = self.state_hash_mapping[new_state_hash]
+        self.reuse +=1
+        break
+
+    if not found_existing:
+      self.current_root = mcts.MCTSNode(gameState, None, None, 1, self.index)
+      self.state_hash_mapping[new_state_hash] = self.current_root
+
+  def traverse(self):
+    while self.current_node.children:
+      self.next_index(self.current_node.agentIndex)
+      uct_values = {child: mcts.MCTSNode.uct_value(child) for child in self.current_node.children}
+      self.current_node = max(uct_values, key=uct_values.get)
+      self.treelevel += 1
+
+  def expand(self, sim_index):
+    if not self.is_terminal(self.current_node.state) and self.current_node.visits > 0:
+      actions = self.current_node.state.getLegalActions(sim_index)
+      if actions:  # Make sure there are legal actions
+        for action in actions:
+          next_state = self.current_node.state.generateSuccessor(sim_index, action)
+          state_hash = self.get_state_hash(next_state)
+          new_child = mcts.MCTSNode(next_state, self.current_node, action, 0, self.next_index(self.index))
+          self.state_hash_mapping[state_hash] = new_child
+          self.current_node.children.append(new_child)
+        if self.current_node.children:
+          uct_values = {child: mcts.MCTSNode.uct_value(child) for child in self.current_node.children}
+          self.current_node = max(uct_values, key=uct_values.get)
+
+  def simulate(self, sim_index):
+    self.sim_gameState = self.current_node.state
+    current_sim_index = sim_index
+    current_depth = 0
+
+    while not self.is_terminal(self.sim_gameState) and current_depth < self.max_depth:
+      actions = self.sim_gameState.getLegalActions(current_sim_index)
+      if not actions:
+        break
+      action = random.choice(actions)
+      self.sim_gameState = self.sim_gameState.generateSuccessor(current_sim_index, action)
+      current_sim_index = (current_sim_index + 1) % self.numberOfAgents
+      current_depth += 1
+
+  def backpropagate(self, reward):
+    while self.current_node.parent:
+      self.current_node.visits += 1
+      self.current_node.reward += reward
+      self.current_node = self.current_node.parent
 
 class attackingAgent(Agents):
 
@@ -111,114 +175,35 @@ class attackingAgent(Agents):
     sindex = self.get_index(self.index, self.numberOfAgents)
     sim_index = next(sindex)
 
-    self.current_root = mcts.MCTSNode(gameState, None, None, 1, self.index)
+    #Set the root node
+    self.getRoot(gameState)
 
     iteration = 0
-    treelevel = 0
+    self.treelevel = 0
 
     #Start MCTS Tree Loop
     while time.time() - start_time < self.simulation_time:
+
       iteration += 1
-      #Traverse the tree
-      current_node = self.current_root
-      is_leaf = False
+      self.current_node = self.current_root
 
-      #Check if current node is a leaf
-      while current_node.children:
-
-          #sim_index = next(sindex)
-          sim_index = self.next_index(current_node.agentIndex)
-          uct_values = {child: mcts.MCTSNode.uct_value(child) for child in current_node.children}
-          current_node = max(uct_values, key=uct_values.get)
-          treelevel += 1
-
+      #Traverse to leaf
+      self.traverse()
 
       #Expand
-      if not self.is_terminal(current_node.state) and current_node.visits > 0:
-        actions = current_node.state.getLegalActions(sim_index)
-        if actions:  # Make sure there are legal actions
-          for action in actions:
-            next_state = current_node.state.generateSuccessor(sim_index, action)
-            new_child = mcts.MCTSNode(next_state, current_node, action, 0, self.next_index(self.index))
-            current_node.children.append(new_child)
-          if current_node.children:
-            current_node = current_node.children[0]
+      self.expand(sim_index)
 
       #Simulate
-      sim_gameState = current_node.state
-      current_sim_index = sim_index
-      current_depth = 0
+      self.simulate(sim_index)
 
-      while not self.is_terminal(sim_gameState) and current_depth < self.max_depth:
-        actions = sim_gameState.getLegalActions(current_sim_index)
-        if not actions:
-          break
-        action = random.choice(actions)
-        sim_gameState = sim_gameState.generateSuccessor(current_sim_index, action)
-        current_sim_index = (current_sim_index + 1) % self.numberOfAgents
-        current_depth += 1
-
-      # Evaluate
-      if not sim_gameState:
-        return 0
-
-      if hasattr(sim_gameState.data, '_win') and sim_gameState.data._win:
-        return 1000
-
-      foodList = sim_gameState.getRedFood().asList() if self.red else sim_gameState.getBlueFood().asList()
-      if not foodList:
-        return 1000
-
-      pacmanState = sim_gameState.getAgentState(self.me)
-      pacmanPosition = pacmanState.getPosition()
-
-      foodDistances = [self.distancer.getDistance(pacmanPosition, food) for food in foodList]
-      minFoodDist = min(foodDistances) if foodDistances else 0
-      foodCarrying = pacmanState.numCarrying
-
-      enemies = self.getOpponents(sim_gameState)
-      enemy_positions = [sim_gameState.getAgentPosition(i) for i in enemies if
-                         sim_gameState.getAgentPosition(i) is not None]
-
-      max_maze_dist = 20
-      enemy_distance = min([self.distancer.getDistance(pacmanPosition, pos) for pos in
-                            enemy_positions]) if enemy_positions else max_maze_dist
-
-      home_positions = []
-      if self.red:
-        home_x = (sim_gameState.getWalls().width // 2) - 1
-      else:
-        home_x = (sim_gameState.getWalls().width // 2)
-
-      for y in range(sim_gameState.getWalls().height):
-        if not sim_gameState.hasWall(home_x, y):
-          home_positions.append((home_x, y))
-
-      home_distances = [self.distancer.getDistance(pacmanPosition, pos) for pos in home_positions]
-      min_home_dist = min(home_distances) if home_distances else 0
-
-      # Weights
-      w_food_dist = 40.0
-      w_food_carrying = 20.0
-      w_enemy_dist = 5.0
-      w_home_dist = 5.0
-
-      food_reward = w_food_dist * (1 - (minFoodDist / max_maze_dist))
-      carrying_reward = w_food_carrying * (foodCarrying / 10.0)  # Assuming 10 is max food to carry
-      enemy_penalty = w_enemy_dist * (1 - (enemy_distance / max_maze_dist))
-
-      home_reward = 0
-      if foodCarrying > 0:
-        home_reward = w_home_dist * (1 - (min_home_dist / max_maze_dist)) * foodCarrying
-
-      raw_reward = food_reward + carrying_reward + home_reward - enemy_penalty
-      reward = max(0, min(1000, raw_reward * 10))
+      #Evaluate
+      reward = self.evaluate()
 
       #Backpropagate
-      while current_node.parent:
-        current_node.visits += 1
-        current_node.reward += reward
-        current_node = current_node.parent
+      self.backpropagate(reward)
+      print(f'\rCurrently at iteration: {iteration}', end='', flush=True)
+
+    print(f'\rSearched {iteration} iterations in {(time.time() - start_time):.4f} seconds. Reused {self.reuse} nodes. ', end='', flush=True)
 
     best_node = max(self.current_root.children, key=lambda node: node.reward)
     if not best_node.action or best_node.action not in gameState.getLegalActions(self.index):
@@ -227,3 +212,91 @@ class attackingAgent(Agents):
         return random.choice(gameState.getLegalActions(self.index))
     print(f"Executing action {best_node.action}")
     return best_node.action
+
+  def evaluate(self):
+    if not self.sim_gameState:
+      return 0
+
+    if hasattr(self.sim_gameState.data, '_win') and self.sim_gameState.data._win:
+      return 1000
+
+    foodPositions = self.sim_gameState.getRedFood().asList() if self.red else self.sim_gameState.getBlueFood().asList()
+    if not foodPositions:
+      return 1000
+
+
+    pacmanState = self.sim_gameState.getAgentState(self.me)
+    pacmanPosition = pacmanState.getPosition()
+    foodDist = [self.distancer.getDistance(pacmanPosition, food) for food in foodPositions]
+
+    foodCarrying = pacmanState.numCarrying
+
+    enemies = self.getOpponents(self.sim_gameState)
+    enemy_positions = [self.sim_gameState.getAgentPosition(i) for i in enemies if
+                       self.sim_gameState.getAgentPosition(i) is not None]
+
+    max_maze_dist = self.sim_gameState.data.layout.width - 2
+    enemy_distance = min([self.distancer.getDistance(pacmanPosition, pos) for pos in
+                          enemy_positions]) if enemy_positions else max_maze_dist
+
+    width = self.sim_gameState.data.layout.width
+    height = self.sim_gameState.data.layout.height
+    walls = self.sim_gameState.getWalls().asList()
+
+    if self.red:
+      home_territory = [(float(x), float(y)) for x in range(1, width // 2)
+                        for y in range(1, height)
+                        if (x, y) not in walls]
+      enemy_territory =  [(float(x), float(y)) for x in range(width // 2, width - 1)
+                        for y in range(1, height)
+                        if (x, y) not in walls]
+    else:
+      home_territory = [(float(x), float(y)) for x in range(width // 2, width - 1)
+                        for y in range(1, height)
+                        if (x, y) not in walls]
+      enemy_territory = [(float(x), float(y)) for x in range(1, width // 2)
+                         for y in range(1, height)
+                         if (x, y) not in walls]
+
+    # Weights
+    w_food_dist = 40.0
+    w_food_carrying = 20.0
+    w_enemy_dist = 5.0
+    w_home_dist = 5.0
+
+    distPacEnem = min([self.distancer.getDistance(pacmanPosition, pos) for pos in
+                          enemy_positions]) if enemy_positions else max_maze_dist
+
+    distPacFood = min(foodDist) if foodDist else 0
+    distPacHome = min([self.distancer.getDistance(pacmanPosition, pos) for pos in home_territory])
+    distPacCapt = min([self.distancer.getDistance(pacmanPosition, pos) for pos in enemy_territory])
+
+    position_score = 0
+    food_score = 0
+
+    if foodCarrying >= self.max_food_carry and pacmanPosition not in home_territory:
+      position_score -= 1000
+
+    if foodCarrying < self.max_food_carry and pacmanPosition in home_territory:
+      position_score -= 1000
+
+    if foodCarrying < self.max_food_carry:
+      food_score -= 1000
+
+    if foodCarrying >= self.max_food_carry:
+      food_score += 1000
+
+
+    food_reward = w_food_dist * (1 - (distPacFood / max_maze_dist))
+    carrying_reward = w_food_carrying * (foodCarrying / self.max_food_carry)
+    enemy_penalty = w_enemy_dist * (1 - (distPacEnem / max_maze_dist))
+    territory_reward = foodCarrying * (1 - (distPacEnem / max_maze_dist))
+
+    home_reward = 0
+    if foodCarrying > 0:
+      home_reward = w_home_dist * (1 - (distPacHome / max_maze_dist)) * foodCarrying
+
+    raw_reward = food_reward + carrying_reward + home_reward - enemy_penalty + territory_reward
+    reward = max(0, min(1000, raw_reward * 10))
+
+    return reward
