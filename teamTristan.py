@@ -25,7 +25,7 @@ from mcts import MCTS
 #################
 
 def createTeam(firstIndex, secondIndex, isRed,
-               first = 'attackingAgent', second = 'attackingAgent'):
+               first = 'attackingAgent', second = 'defendingAgent'):
   """
   This function should return a list of two agents that will form the
   team, initialized using firstIndex and secondIndex as their agent
@@ -75,7 +75,7 @@ class Agents(CaptureAgent):
     Your initialization code goes here, if you need any.
     '''
     self.simulation_time = 0.4
-    self.max_depth = 60
+    self.max_depth = 12
     self.treelevel = 0
     self.state_hash_mapping = {}
 
@@ -88,7 +88,7 @@ class Agents(CaptureAgent):
     self.numberOfAgents = gameState.getNumAgents()
     self.me = self.index
     self.mate = self.getTeam(gameState)[1] if self.getTeam(gameState)[0] == self.index else self.getTeam(gameState)[0]
-    self.max_food_carry = 2
+    self.max_food_carry = 3
 
   def get_index(self, start = 0, n = 4):
     while True:
@@ -213,31 +213,48 @@ class attackingAgent(Agents):
     print(f"Executing action {best_node.action}")
     return best_node.action
 
+  # Paste this into the patch instructions
   def evaluate(self):
+
+    # -- Weights --
+    W_SCORE = 50.0  # Weight for the current game score
+    W_INV_FOOD_DIST = 50.0  # Weight for (1 / distance to food)
+    W_CARRY_BONUS = 50  # Weight for each piece of carried food
+    W_RETURN_HOME = 1000.0  # Extra reward for moving closer to boundary if carrying
+    W_GHOST_DANGER = 500.0  # Penalty multiplier for being near ghosts
+    W_CAPSULE_INV_DIST = 10.0  # Weight for (1 / distance to capsule)
+
     if not self.sim_gameState:
       return 0
 
-    if hasattr(self.sim_gameState.data, '_win') and self.sim_gameState.data._win:
-      return 1000
+    if getattr(self.sim_gameState.data, '_win', False):
+      return 9999  # large positive
+    if getattr(self.sim_gameState.data, '_lose', False):
+      return -9999  # large negative
 
-    foodPositions = self.sim_gameState.getRedFood().asList() if self.red else self.sim_gameState.getBlueFood().asList()
-    if not foodPositions:
-      return 1000
+    game_score = self.getScore(self.sim_gameState) * W_SCORE
 
+    my_state = self.sim_gameState.getAgentState(self.index)
+    my_pos = my_state.getPosition()
+    if not my_pos:
+      return game_score
 
-    pacmanState = self.sim_gameState.getAgentState(self.me)
-    pacmanPosition = pacmanState.getPosition()
-    foodDist = [self.distancer.getDistance(pacmanPosition, food) for food in foodPositions]
+    if self.red:
+      food_list = self.sim_gameState.getBlueFood().asList()
+      capsules = self.sim_gameState.getBlueCapsules()
+    else:
+      food_list = self.sim_gameState.getRedFood().asList()
+      capsules = self.sim_gameState.getRedCapsules()
 
-    foodCarrying = pacmanState.numCarrying
+    if len(food_list) > 0:
+      closest_food_dist = min(self.distancer.getDistance(my_pos, f) for f in food_list)
+      inv_food_dist = (1.0 / (closest_food_dist + 1.0)) * W_INV_FOOD_DIST
+    else:
+      inv_food_dist = 0
 
-    enemies = self.getOpponents(self.sim_gameState)
-    enemy_positions = [self.sim_gameState.getAgentPosition(i) for i in enemies if
-                       self.sim_gameState.getAgentPosition(i) is not None]
+    carrying = my_state.numCarrying
+    carry_bonus = carrying * W_CARRY_BONUS
 
-    max_maze_dist = self.sim_gameState.data.layout.width - 2
-    enemy_distance = min([self.distancer.getDistance(pacmanPosition, pos) for pos in
-                          enemy_positions]) if enemy_positions else max_maze_dist
 
     width = self.sim_gameState.data.layout.width
     height = self.sim_gameState.data.layout.height
@@ -247,56 +264,204 @@ class attackingAgent(Agents):
       home_territory = [(float(x), float(y)) for x in range(1, width // 2)
                         for y in range(1, height)
                         if (x, y) not in walls]
-      enemy_territory =  [(float(x), float(y)) for x in range(width // 2, width - 1)
-                        for y in range(1, height)
-                        if (x, y) not in walls]
+      boundary_positions = [(float(x), float(y)) for x in range(width // 2) for y in range(1, height) if (x, y) not in walls]
+
+      enemy_territory = [(float(x), float(y)) for x in range(width // 2, width - 1)
+                         for y in range(1, height)
+                         if (x, y) not in walls]
     else:
       home_territory = [(float(x), float(y)) for x in range(width // 2, width - 1)
                         for y in range(1, height)
                         if (x, y) not in walls]
+      boundary_positions = [(float(x), float(y)) for x in range(width // 2 + 1) for y in range(1, height) if
+                            (x, y) not in walls]
       enemy_territory = [(float(x), float(y)) for x in range(1, width // 2)
                          for y in range(1, height)
                          if (x, y) not in walls]
 
-    # Weights
-    w_food_dist = 40.0
-    w_food_carrying = 20.0
-    w_enemy_dist = 5.0
-    w_home_dist = 5.0
-
-    distPacEnem = min([self.distancer.getDistance(pacmanPosition, pos) for pos in
-                          enemy_positions]) if enemy_positions else max_maze_dist
-
-    distPacFood = min(foodDist) if foodDist else 0
-    distPacHome = min([self.distancer.getDistance(pacmanPosition, pos) for pos in home_territory])
-    distPacCapt = min([self.distancer.getDistance(pacmanPosition, pos) for pos in enemy_territory])
-
-    position_score = 0
-    food_score = 0
-
-    if foodCarrying >= self.max_food_carry and pacmanPosition not in home_territory:
-      position_score -= 1000
-
-    if foodCarrying < self.max_food_carry and pacmanPosition in home_territory:
-      position_score -= 1000
-
-    if foodCarrying < self.max_food_carry:
-      food_score -= 1000
-
-    if foodCarrying >= self.max_food_carry:
-      food_score += 1000
 
 
-    food_reward = w_food_dist * (1 - (distPacFood / max_maze_dist))
-    carrying_reward = w_food_carrying * (foodCarrying / self.max_food_carry)
-    enemy_penalty = w_enemy_dist * (1 - (distPacEnem / max_maze_dist))
-    territory_reward = foodCarrying * (1 - (distPacEnem / max_maze_dist))
+    if boundary_positions and carrying > 0:
+      closest_boundary_dist = min(self.distancer.getDistance(my_pos, b) for b in boundary_positions)
+      ratio = float(carrying) / float(self.max_food_carry)
+      return_home_bonus = (1.0 / (closest_boundary_dist + 1.0)) * W_RETURN_HOME * ratio
+    else:
+      return_home_bonus = 0
 
-    home_reward = 0
-    if foodCarrying > 0:
-      home_reward = w_home_dist * (1 - (distPacHome / max_maze_dist)) * foodCarrying
+    if capsules:
+      closest_capsule_dist = min(self.distancer.getDistance(my_pos, cap) for cap in capsules)
+      inv_capsule_dist = (1.0 / (closest_capsule_dist + 1.0)) * W_CAPSULE_INV_DIST
+    else:
+      inv_capsule_dist = 0
 
-    raw_reward = food_reward + carrying_reward + home_reward - enemy_penalty + territory_reward
-    reward = max(0, min(1000, raw_reward * 10))
+    enemies = [self.sim_gameState.getAgentState(i) for i in self.getOpponents(self.sim_gameState)]
+    defending_ghosts = [
+      e for e in enemies
+      if not e.isPacman and e.getPosition() is not None
+    ]
+    if defending_ghosts:
+      ghost_distances = [self.distancer.getDistance(my_pos, g.getPosition()) for g in defending_ghosts]
+      closest_ghost_dist = min(ghost_distances)
+      if closest_ghost_dist < 5:
+        ghost_penalty = -W_GHOST_DANGER * (5.0 - closest_ghost_dist)
+      else:
+        ghost_penalty = 0
+    else:
+      ghost_penalty = 0
+
+    reward = 0.0
+    reward += game_score
+    reward += inv_food_dist
+    reward += carry_bonus
+    reward += return_home_bonus
+    reward += inv_capsule_dist
+    reward += ghost_penalty
 
     return reward
+
+
+class defendingAgent(Agents):
+
+  def chooseAction(self, gameState):
+
+    start_time = time.time()
+
+    sindex = self.get_index(self.index, self.numberOfAgents)
+    sim_index = next(sindex)
+
+    #Set the root node
+    self.getRoot(gameState)
+
+    iteration = 0
+    self.treelevel = 0
+
+    #Start MCTS Tree Loop
+    while time.time() - start_time < self.simulation_time:
+
+      iteration += 1
+      self.current_node = self.current_root
+
+      #Traverse to leaf
+      self.traverse()
+
+      #Expand
+      self.expand(sim_index)
+
+      #Simulate
+      self.simulate(sim_index)
+
+      #Evaluate
+      reward = self.evaluate()
+
+      #Backpropagate
+      self.backpropagate(reward)
+      print(f'\rCurrently at iteration: {iteration}', end='', flush=True)
+
+    print(f'\rSearched {iteration} iterations in {(time.time() - start_time):.4f} seconds. Reused {self.reuse} nodes. ', end='', flush=True)
+
+    best_node = max(self.current_root.children, key=lambda node: node.reward)
+    if not best_node.action or best_node.action not in gameState.getLegalActions(self.index):
+        print(f"{best_node.action} is not part of {gameState.getLegalActions(self.index)}")
+        print("No best node found, returning random action")
+        return random.choice(gameState.getLegalActions(self.index))
+    print(f"Executing action {best_node.action}")
+    return best_node.action
+
+  # Paste this into the patch instructions
+  def evaluate(self):
+    """
+    A defensive evaluation function that emphasizes:
+      - Intercepting enemy Pacmen on our side
+      - Guarding capsules (if available)
+      - Eating enemy Pacmen quickly when we are not scared
+      - Avoiding/fleeing if we are scared
+
+    Weights are made explicit so you can tune them.
+    """
+
+    # -- Weights (adjust as desired) --
+    W_SCORE               = 50.0   # Weight for the current game score
+    W_INV_ENEMY_DIST      = 500.0  # Reward for closing distance to enemy Pacman on our side
+    W_ENEMY_CARRY_BONUS   = 500.0   # Additional bonus if that enemy is carrying food
+    W_SCARED_PENALTY      = 100.0  # Penalty for engaging if we're scared
+    W_CAPSULE_PROTECTION  = 25.0   # Encouragement to guard capsules
+
+    # 1. If there's no simulated state, return 0
+    if not self.sim_gameState:
+        return 0
+
+    # 2. Win/Lose check
+    if getattr(self.sim_gameState.data, '_win', False):
+        return 9999  # huge positive
+    if getattr(self.sim_gameState.data, '_lose', False):
+        return -9999 # huge negative
+
+    # 3. Base game score from our perspective
+    game_score = self.getScore(self.sim_gameState) * W_SCORE
+
+    # 4. Gather info about our agent
+    my_state = self.sim_gameState.getAgentState(self.index)
+    my_pos   = my_state.getPosition()
+    if not my_pos:
+        # If we don't know our position, fall back to the base score
+        return game_score
+
+    # 5. Determine relevant capsules (these are your team's capsules)
+    #    On defense, you typically want to guard your capsules so the enemy can't get them.
+    if self.red:
+        capsules = self.sim_gameState.getRedCapsules()
+    else:
+        capsules = self.sim_gameState.getBlueCapsules()
+
+    # 6. Identify enemy Pacmen
+    #    We want to penalize distance if they're in our territory.
+    opponents = [self.sim_gameState.getAgentState(i) for i in self.getOpponents(self.sim_gameState)]
+    visible_enemy_pacmen = [
+        o for o in opponents
+        if o.isPacman and o.getPosition() is not None
+    ]
+
+    # 7. Evaluate distance to visible Pacmen on our side
+    #    If an enemy is on our side, we want to be close enough to eat them if we're not scared.
+    inv_enemy_dist_total = 0.0
+
+    # Are we currently scared? If our 'scaredTimer' > 0, it means we can't eat them right now.
+    we_are_scared = (my_state.scaredTimer > 0)
+
+    for enemy in visible_enemy_pacmen:
+        enemy_pos = enemy.getPosition()
+        dist = self.distancer.getDistance(my_pos, enemy_pos)
+
+        # The closer we are, the bigger the reward (unless we're scared)
+        inv_dist = (1.0 / (dist + 1.0)) if dist > 0 else 1.0
+
+        # If we're scared, there's a penalty for being *too* close
+        if we_are_scared:
+            # The closer we get, the more we risk being eaten
+            inv_enemy_dist_total -= W_SCARED_PENALTY * inv_dist
+        else:
+            # We want to get closer to eat them
+            inv_enemy_dist_total += W_INV_ENEMY_DIST * inv_dist
+
+        # If the enemy is carrying food, we add an extra bonus for chasing them
+        if enemy.numCarrying > 0 and not we_are_scared:
+            inv_enemy_dist_total += W_ENEMY_CARRY_BONUS * float(enemy.numCarrying)
+
+    # 8. Capsule protection
+    #    We may want to be near capsules on our side so that enemy Pacmen can’t easily grab them.
+    #    The idea: The closer we are to our capsules, the better we can defend them.
+    capsule_guard_value = 0.0
+    if capsules:
+        closest_capsule_dist = min(self.distancer.getDistance(my_pos, c) for c in capsules)
+        # The closer we are, the more we are “protecting” it
+        inv_capsule_dist = (1.0 / (closest_capsule_dist + 1.0))
+        capsule_guard_value += W_CAPSULE_PROTECTION * inv_capsule_dist
+
+    # 9. Sum the final evaluation
+    evaluation = 0.0
+    evaluation += game_score
+    evaluation += inv_enemy_dist_total
+    evaluation += capsule_guard_value
+
+    return evaluation
+
