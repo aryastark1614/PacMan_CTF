@@ -1,0 +1,102 @@
+from captureAgents import CaptureAgent
+import random, time, util, math
+from game import Directions
+
+class MCTSAgent(CaptureAgent):
+    def registerInitialState(self, gameState):
+        CaptureAgent.registerInitialState(self, gameState)
+        self.last_positions = []  # Track previous positions to avoid oscillation
+    
+    def chooseAction(self, gameState):
+        """ Runs MCTS to select the best action """
+        time_limit = 0.8  # Limit per move
+        start_time = time.time()
+        root = MCTSNode(gameState, None, None, self.index, self.last_positions)
+        
+        while time.time() - start_time < time_limit:
+            node = root.select()
+            reward = node.rollout()
+            node.backpropagate(reward)
+        
+        best_action = root.best_child().action
+        self.last_positions.append(gameState.getAgentPosition(self.index))
+        if len(self.last_positions) > 5:
+            self.last_positions.pop(0)  # Keep track of last 5 positions to prevent loops
+        return best_action
+    
+class MCTSNode:
+    def __init__(self, state, parent, action, agent_index, last_positions):
+        self.state = state
+        self.parent = parent
+        self.action = action
+        self.agent_index = agent_index
+        self.last_positions = last_positions  # Track previous positions
+        self.children = []
+        self.visits = 1
+        self.value = 0
+    
+    def select(self):
+        """ Select the best child using UCT """
+        if not self.children:
+            return self.expand()
+        return max(self.children, key=lambda c: c.value / c.visits + math.sqrt(2 * math.log(self.visits) / c.visits))
+    
+    def expand(self):
+        """ Expands a new child node """
+        actions = self.state.getLegalActions(self.agent_index)
+        if actions:
+            action = random.choice(actions)
+            next_state = self.state.generateSuccessor(self.agent_index, action)
+            child_node = MCTSNode(next_state, self, action, self.agent_index, self.last_positions)
+            self.children.append(child_node)
+            return child_node
+        return self
+    
+    def rollout(self):
+        """ Runs a rollout using a heuristic policy """
+        state = self.state
+        for _ in range(10):  # Limit rollout depth
+            actions = state.getLegalActions(self.agent_index)
+            if not actions:
+                break
+            state = state.generateSuccessor(self.agent_index, self.heuristicPolicy(state, actions))
+        return self.evaluate(state)
+    
+    def backpropagate(self, reward):
+        """ Backpropagate the result up the tree """
+        self.visits += 1
+        self.value += reward
+        if self.parent:
+            self.parent.backpropagate(reward)
+    
+    def best_child(self):
+        """ Returns the child with the highest value """
+        return max(self.children, key=lambda c: c.value / c.visits)
+    
+    def heuristicPolicy(self, state, actions):
+        """ Picks a greedy action towards food while avoiding enemies """
+        food = self.parent.state.getFood().asList()
+        enemies = [state.getAgentPosition(i) for i in state.getBlueTeamIndices() if state.getAgentPosition(i) is not None]
+        
+        if not food:
+            return random.choice(actions)
+        
+        def danger(action):
+            next_pos = state.generateSuccessor(self.agent_index, action).getAgentPosition(self.agent_index)
+            return any(util.manhattanDistance(next_pos, enemy) < 3 for enemy in enemies)  # Avoid close enemies
+        
+        safe_actions = [a for a in actions if not danger(a)]
+        if not safe_actions:
+            safe_actions = actions  # If no safe actions, take any
+        
+        best_action = min(safe_actions, key=lambda a: min(util.manhattanDistance(state.generateSuccessor(self.agent_index, a).getAgentPosition(self.agent_index), f) for f in food))
+        return best_action
+    
+    def evaluate(self, state):
+        """ Evaluates a game state based on food collected and safety """
+        food_left = len(state.getBlueFood().asList()) if self.agent_index in state.getRedTeamIndices() else len(state.getRedFood().asList())
+        
+        position = state.getAgentPosition(self.agent_index)
+        loop_penalty = -5 if position in self.last_positions else 0  # Penalize staying in the same place
+        
+        return 100 - food_left + loop_penalty  # Higher reward for collecting food and avoiding loops
