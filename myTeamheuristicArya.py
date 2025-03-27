@@ -1,50 +1,162 @@
 from captureAgents import CaptureAgent
-import random, time, util, math
+import random, util
 from game import Directions
 
-class HeuristicAgent(CaptureAgent):
+def createTeam(firstIndex, secondIndex, isRed,
+               first = 'HunterAgent', second = 'DefenderAgent'):
+    return [eval(first)(firstIndex), eval(second)(secondIndex)]
+
+class BaseAgent(CaptureAgent):
     def registerInitialState(self, gameState):
         CaptureAgent.registerInitialState(self, gameState)
-        self.last_positions = []  # Track previous positions to avoid oscillation
-    
+        self.start = gameState.getAgentPosition(self.index)
+
+class HunterAgent(BaseAgent):
     def chooseAction(self, gameState):
-        """ Chooses the best action based on heuristic evaluation """
-        actions = gameState.getLegalActions(self.index)
-        best_action = max(actions, key=lambda a: self.evaluate(gameState, a))
+        # Analyze enemy positions
+        enemies = [gameState.getAgentState(i) for i in self.getOpponents(gameState)]
+        visible_enemies = [e for e in enemies if e.isPacman and e.getPosition() is not None]
         
-        self.last_positions.append(gameState.getAgentPosition(self.index))
-        if len(self.last_positions) > 5:
-            self.last_positions.pop(0)  # Keep track of last 5 positions to prevent loops
+        # High priority: hunt enemy Pacmen
+        if visible_enemies:
+            return self.hunt_enemies(gameState, visible_enemies)
         
-        return best_action
+        # Collect food if no enemies visible
+        return self.collect_food(gameState)
     
-    def evaluate(self, gameState, action):
-        """ State evaluation function for heuristic decision making """
-        successor = gameState.generateSuccessor(self.index, action)
-        position = successor.getAgentPosition(self.index)
-        food_list = self.getFood(successor).asList()
-        capsules = self.getCapsules(successor)
-        enemies = [successor.getAgentPosition(i) for i in self.getOpponents(successor) if successor.getAgentPosition(i) is not None]
+    def hunt_enemies(self, gameState, enemies):
+        """Aggressive hunting strategy for enemy Pacmen"""
+        my_pos = gameState.getAgentPosition(self.index)
         
-        score = successor.getScore()
+        # Find closest enemy Pacman
+        target_enemy = min(enemies, key=lambda e: self.getMazeDistance(my_pos, e.getPosition()))
+        enemy_pos = target_enemy.getPosition()
         
-        # Encourage eating food
-        if food_list:
-            closest_food = min(food_list, key=lambda f: util.manhattanDistance(position, f))
-            score += 10 / (1 + util.manhattanDistance(position, closest_food))
+        # Get all legal actions
+        actions = gameState.getLegalActions(self.index)
         
-        # Encourage eating capsules
-        if capsules:
-            closest_capsule = min(capsules, key=lambda c: util.manhattanDistance(position, c))
-            score += 20 / (1 + util.manhattanDistance(position, closest_capsule))
+        # Prioritize actions that move towards enemy
+        hunt_actions = [
+            action for action in actions 
+            if self.get_next_position(my_pos, action) != my_pos and
+            self.getMazeDistance(self.get_next_position(my_pos, action), enemy_pos) < 
+            self.getMazeDistance(my_pos, enemy_pos)
+        ]
         
-        # Avoid enemies
-        for enemy in enemies:
-            if util.manhattanDistance(position, enemy) < 3:
-                score -= 50  # Strong penalty for being near an enemy
+        return random.choice(hunt_actions) if hunt_actions else random.choice(actions)
+    
+    def collect_food(self, gameState):
+        """Systematic food collection strategy"""
+        my_pos = gameState.getAgentPosition(self.index)
+        food_list = self.getFood(gameState).asList()
         
-        # Avoid looping
-        if position in self.last_positions:
-            score -= 5  # Small penalty for repeating positions
+        # If no food, return to start
+        if not food_list:
+            return self.go_home(gameState)
         
-        return score
+        # Find closest food
+        target_food = min(food_list, key=lambda f: self.getMazeDistance(my_pos, f))
+        
+        # Plan move towards food
+        actions = gameState.getLegalActions(self.index)
+        food_actions = [
+            action for action in actions 
+            if self.get_next_position(my_pos, action) != my_pos and
+            self.getMazeDistance(self.get_next_position(my_pos, action), target_food) < 
+            self.getMazeDistance(my_pos, target_food)
+        ]
+        
+        return random.choice(food_actions) if food_actions else random.choice(actions)
+    
+    def go_home(self, gameState):
+        """Return to starting position if lost"""
+        my_pos = gameState.getAgentPosition(self.index)
+        actions = gameState.getLegalActions(self.index)
+        
+        home_actions = [
+            action for action in actions 
+            if self.get_next_position(my_pos, action) != my_pos and
+            self.getMazeDistance(self.get_next_position(my_pos, action), self.start) < 
+            self.getMazeDistance(my_pos, self.start)
+        ]
+        
+        return random.choice(home_actions) if home_actions else random.choice(actions)
+    
+    def get_next_position(self, position, action):
+        """Compute next position after an action"""
+        x, y = position
+        if action == Directions.NORTH:
+            return (x, y+1)
+        elif action == Directions.SOUTH:
+            return (x, y-1)
+        elif action == Directions.EAST:
+            return (x+1, y)
+        elif action == Directions.WEST:
+            return (x-1, y)
+        return position
+
+class DefenderAgent(BaseAgent):
+    def chooseAction(self, gameState):
+        # Analyze enemy Pacmen
+        enemies = [gameState.getAgentState(i) for i in self.getOpponents(gameState)]
+        invading_enemies = [e for e in enemies if e.isPacman and e.getPosition() is not None]
+        
+        # Defend home territory
+        if invading_enemies:
+            return self.intercept_enemies(gameState, invading_enemies)
+        
+        # Patrol near home base
+        return self.patrol_home(gameState)
+    
+    def intercept_enemies(self, gameState, enemies):
+        """Intercept strategy for enemy Pacmen in our territory"""
+        my_pos = gameState.getAgentPosition(self.index)
+        
+        # Find closest invading enemy
+        target_enemy = min(enemies, key=lambda e: self.getMazeDistance(my_pos, e.getPosition()))
+        enemy_pos = target_enemy.getPosition()
+        
+        actions = gameState.getLegalActions(self.index)
+        
+        # Prioritize actions that move towards enemy
+        intercept_actions = [
+            action for action in actions 
+            if self.get_next_position(my_pos, action) != my_pos and
+            self.getMazeDistance(self.get_next_position(my_pos, action), enemy_pos) < 
+            self.getMazeDistance(my_pos, enemy_pos)
+        ]
+        
+        return random.choice(intercept_actions) if intercept_actions else random.choice(actions)
+    
+    def patrol_home(self, gameState):
+        """Patrol near home base to prevent enemy intrusion"""
+        my_pos = gameState.getAgentPosition(self.index)
+        actions = gameState.getLegalActions(self.index)
+        
+        # Prefer actions that keep agent close to home
+        home_patrol_actions = [
+            action for action in actions 
+            if self.getMazeDistance(self.get_next_position(my_pos, action), self.start) < 10
+        ]
+        
+        return random.choice(home_patrol_actions) if home_patrol_actions else random.choice(actions)
+    
+    def get_next_position(self, position, action):
+        """Compute next position after an action"""
+        x, y = position
+        if action == Directions.NORTH:
+            return (x, y+1)
+        elif action == Directions.SOUTH:
+            return (x, y-1)
+        elif action == Directions.EAST:
+            return (x+1, y)
+        elif action == Directions.WEST:
+            return (x-1, y)
+        return position
+
+
+
+
+
+
+
