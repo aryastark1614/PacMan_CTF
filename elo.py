@@ -1,6 +1,7 @@
+import math
 import os
 import subprocess
-import math
+
 
 # Elo rating update function
 def update_elo(rating1, rating2, score1, k=32):
@@ -27,22 +28,22 @@ def evaluate_agents(agent1_file, agent2_file, num_games=20):
         
         # Run Pac-Man game and capture result
         result = subprocess.run(
-            ["python3", "capture.py", "--red", agent1_name, "--blue", agent2_name],
+            ["python", "capture.py", "--red", agent1_name, "--blue", agent2_name],
             capture_output=True, text=True
         )
 
         # Determine winner based on output (you may need to modify this based on your game output)
         output = result.stdout.lower()
-        if "agent1 wins" in output:
+        if "red team" in output:
             winner = agent1_name
             loser = agent2_name
             score = 1
-        elif "agent2 wins" in output:
+        elif "blue team" in output:
             winner = agent2_name
             loser = agent1_name
             score = 0
         else:
-            continue  # Skip if no clear winner
+            continue
 
         wins[winner] += 1
 
@@ -57,6 +58,6 @@ def evaluate_agents(agent1_file, agent2_file, num_games=20):
 
 # Example Usage
 if __name__ == "__main__":
-    agent1 = "baseline.py"
-    agent2 = "myTeamheuristicArya.py"
-    evaluate_agents(agent1, agent2, num_games=50)
+    agent1 = "baselineTeam.py"
+    agent2 = "teamJelkeHeuristic.py"
+    evaluate_agents(agent1, agent2, num_games=1)
