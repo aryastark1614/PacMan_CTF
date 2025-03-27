@@ -1,66 +1,62 @@
-import random
+import os
+import subprocess
 import math
 
-class Agent:
-    def __init__(self, name, rating=1000):
-        self.name = name
-        self.rating = rating
+# Elo rating update function
+def update_elo(rating1, rating2, score1, k=32):
+    expected1 = 1 / (1 + 10 ** ((rating2 - rating1) / 400))
+    expected2 = 1 - expected1  # Because sum of probabilities = 1
 
-    def play(self, opponent):
-        """Simulate a match between this agent and an opponent."""
-        # A simple random win/loss result for demonstration, replace with actual agent logic
-        return random.choice([self, opponent])
+    new_rating1 = rating1 + k * (score1 - expected1)
+    new_rating2 = rating2 + k * ((1 - score1) - expected2)
 
-    def update_elo(self, opponent, result):
-        """Update the agent's ELO rating after a match."""
-        # Calculate the expected score based on ELO ratings
-        expected_score = 1 / (1 + 10 ** ((opponent.rating - self.rating) / 400))
+    return new_rating1, new_rating2
+
+# Run Pac-Man games and evaluate
+def evaluate_agents(agent1_file, agent2_file, num_games=20):
+    agent1_name = os.path.splitext(os.path.basename(agent1_file))[0]
+    agent2_name = os.path.splitext(os.path.basename(agent2_file))[0]
+
+    # Initial Elo ratings
+    ratings = {agent1_name: 1500, agent2_name: 1500}
+
+    wins = {agent1_name: 0, agent2_name: 0}
+
+    for i in range(num_games):
+        print(f"Running game {i+1}/{num_games}...")
         
-        # The outcome of the match: 1 for a win, 0 for a loss, 0.5 for a draw
-        if result == self:
-            actual_score = 1
-        elif result == opponent:
-            actual_score = 0
+        # Run Pac-Man game and capture result
+        result = subprocess.run(
+            ["python3", "capture.py", "--red", agent1_name, "--blue", agent2_name],
+            capture_output=True, text=True
+        )
+
+        # Determine winner based on output (you may need to modify this based on your game output)
+        output = result.stdout.lower()
+        if "agent1 wins" in output:
+            winner = agent1_name
+            loser = agent2_name
+            score = 1
+        elif "agent2 wins" in output:
+            winner = agent2_name
+            loser = agent1_name
+            score = 0
         else:
-            actual_score = 0.5
-        
-        # K-factor determines how much the rating can change
-        K = 32
-        # Update the ratings
-        self.rating += K * (actual_score - expected_score)
-        opponent.rating += K * ((1 - actual_score) - (1 - expected_score))
+            continue  # Skip if no clear winner
 
-    def __repr__(self):
-        return f"{self.name}: {self.rating:.2f}"
+        wins[winner] += 1
 
-def run_tournament(agents, num_matches=100):
-    """Run a tournament with a set of agents."""
-    results = {agent.name: 0 for agent in agents}
-    
-    for i in range(num_matches):
-        agent1, agent2 = random.sample(agents, 2)  # Select two random agents
-        
-        winner = agent1.play(agent2)
-        results[winner.name] += 1
-        agent1.update_elo(agent2, winner)
-    
-    return results
+        # Update Elo ratings
+        ratings[winner], ratings[loser] = update_elo(ratings[winner], ratings[loser], score)
 
-# Define agents: add heuristic and MCTS agents
-heuristic_agent = Agent("myTeamheuristicArya")
-mcts_random_rollouts = Agent("myTeamArya")
-mcts_heuristic_rollouts = Agent("baseline")
+    print(f"Final Elo Ratings after {num_games} games:")
+    print(f"{agent1_name}: {ratings[agent1_name]:.2f}")
+    print(f"{agent2_name}: {ratings[agent2_name]:.2f}")
 
-agents = [heuristic_agent, mcts_random_rollouts, mcts_heuristic_rollouts]
+    return ratings
 
-# Run a tournament with 100 matches
-results = run_tournament(agents, num_matches=1000)
-
-# Print the final results and ELO ratings
-for agent in agents:
-    print(agent)
-
-# Print the tournament results (number of wins)
-print("\nTournament results (number of wins):")
-for name, wins in results.items():
-    print(f"{name}: {wins} wins")
+# Example Usage
+if __name__ == "__main__":
+    agent1 = "baseline.py"
+    agent2 = "myTeamheuristicArya.py"
+    evaluate_agents(agent1, agent2, num_games=50)
