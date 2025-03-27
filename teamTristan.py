@@ -74,8 +74,8 @@ class Agents(CaptureAgent):
     '''
     Your initialization code goes here, if you need any.
     '''
-    self.simulation_time = 0.4
-    self.max_depth = 12
+    self.simulation_time = 0.3
+    self.max_depth = 8
     self.treelevel = 0
     self.state_hash_mapping = {}
 
@@ -203,7 +203,7 @@ class attackingAgent(Agents):
       self.backpropagate(reward)
       print(f'\rCurrently at iteration: {iteration}', end='', flush=True)
 
-    print(f'\rSearched {iteration} iterations in {(time.time() - start_time):.4f} seconds. Reused {self.reuse} nodes. ', end='', flush=True)
+    print(f'\rSearched {iteration} iterations in {(time.time() - start_time):.4f} seconds for Attacker. Reused {self.reuse} nodes. ', end='', flush=True)
 
     best_node = max(self.current_root.children, key=lambda node: node.reward)
     if not best_node.action or best_node.action not in gameState.getLegalActions(self.index):
@@ -217,11 +217,11 @@ class attackingAgent(Agents):
   def evaluate(self):
 
     # -- Weights --
-    W_SCORE = 50.0  # Weight for the current game score
-    W_INV_FOOD_DIST = 50.0  # Weight for (1 / distance to food)
-    W_CARRY_BONUS = 50  # Weight for each piece of carried food
-    W_RETURN_HOME = 1000.0  # Extra reward for moving closer to boundary if carrying
-    W_GHOST_DANGER = 500.0  # Penalty multiplier for being near ghosts
+    W_SCORE = 10.0  # Weight for the current game score
+    W_INV_FOOD_DIST = 10.0  # Weight for (1 / distance to food)
+    W_CARRY_BONUS = 10  # Weight for each piece of carried food
+    W_RETURN_HOME = 50.0  # Extra reward for moving closer to boundary if carrying
+    W_GHOST_DANGER = 10.0  # Penalty multiplier for being near ghosts
     W_CAPSULE_INV_DIST = 10.0  # Weight for (1 / distance to capsule)
 
     if not self.sim_gameState:
@@ -232,7 +232,10 @@ class attackingAgent(Agents):
     if getattr(self.sim_gameState.data, '_lose', False):
       return -9999  # large negative
 
-    game_score = self.getScore(self.sim_gameState) * W_SCORE
+    if self.red:
+      game_score = self.getScore(self.sim_gameState) * W_SCORE
+    else:
+      game_score = -self.getScore(self.sim_gameState) * W_SCORE
 
     my_state = self.sim_gameState.getAgentState(self.index)
     my_pos = my_state.getPosition()
@@ -251,9 +254,6 @@ class attackingAgent(Agents):
       inv_food_dist = (1.0 / (closest_food_dist + 1.0)) * W_INV_FOOD_DIST
     else:
       inv_food_dist = 0
-
-    carrying = my_state.numCarrying
-    carry_bonus = carrying * W_CARRY_BONUS
 
 
     width = self.sim_gameState.data.layout.width
@@ -279,12 +279,20 @@ class attackingAgent(Agents):
                          for y in range(1, height)
                          if (x, y) not in walls]
 
+    carrying = my_state.numCarrying
 
+    if carrying < 3:
+      carry_bonus = carrying * W_CARRY_BONUS
+    else:
+        carry_bonus = -(carrying * W_CARRY_BONUS)
 
-    if boundary_positions and carrying > 0:
+    if boundary_positions:
       closest_boundary_dist = min(self.distancer.getDistance(my_pos, b) for b in boundary_positions)
-      ratio = float(carrying) / float(self.max_food_carry)
-      return_home_bonus = (1.0 / (closest_boundary_dist + 1.0)) * W_RETURN_HOME * ratio
+      if carrying > 2:
+        return_home_bonus = (1.0 / (closest_boundary_dist + 1.0)) * (W_RETURN_HOME * 10)
+      else:
+        ratio = float(carrying) / float(self.max_food_carry)
+        return_home_bonus = (1.0 / (closest_boundary_dist + 1.0)) * W_RETURN_HOME * ratio
     else:
       return_home_bonus = 0
 
@@ -357,7 +365,7 @@ class defendingAgent(Agents):
       self.backpropagate(reward)
       print(f'\rCurrently at iteration: {iteration}', end='', flush=True)
 
-    print(f'\rSearched {iteration} iterations in {(time.time() - start_time):.4f} seconds. Reused {self.reuse} nodes. ', end='', flush=True)
+    print(f'\rSearched {iteration} iterations in {(time.time() - start_time):.4f} seconds for Attacker. Reused {self.reuse} nodes. ', end='', flush=True)
 
     best_node = max(self.current_root.children, key=lambda node: node.reward)
     if not best_node.action or best_node.action not in gameState.getLegalActions(self.index):
@@ -381,8 +389,8 @@ class defendingAgent(Agents):
 
     # -- Weights (adjust as desired) --
     W_SCORE               = 50.0   # Weight for the current game score
-    W_INV_ENEMY_DIST      = 500.0  # Reward for closing distance to enemy Pacman on our side
-    W_ENEMY_CARRY_BONUS   = 500.0   # Additional bonus if that enemy is carrying food
+    W_INV_ENEMY_DIST      = 250.0  # Reward for closing distance to enemy Pacman on our side
+    W_ENEMY_CARRY_BONUS   = 250.0   # Additional bonus if that enemy is carrying food
     W_SCARED_PENALTY      = 100.0  # Penalty for engaging if we're scared
     W_CAPSULE_PROTECTION  = 25.0   # Encouragement to guard capsules
 
@@ -420,6 +428,27 @@ class defendingAgent(Agents):
         o for o in opponents
         if o.isPacman and o.getPosition() is not None
     ]
+    width = self.sim_gameState.data.layout.width
+    height = self.sim_gameState.data.layout.height
+    walls = self.sim_gameState.getWalls().asList()
+    if self.red:
+      home_territory = [(float(x), float(y)) for x in range(1, width // 2)
+                        for y in range(1, height)
+                        if (x, y) not in walls]
+      boundary_positions = [(float(x), float(y)) for x in range(width // 2) for y in range(1, height) if (x, y) not in walls]
+
+      enemy_territory = [(float(x), float(y)) for x in range(width // 2, width - 1)
+                         for y in range(1, height)
+                         if (x, y) not in walls]
+    else:
+      home_territory = [(float(x), float(y)) for x in range(width // 2, width - 1)
+                        for y in range(1, height)
+                        if (x, y) not in walls]
+      boundary_positions = [(float(x), float(y)) for x in range(width // 2 + 1) for y in range(1, height) if
+                            (x, y) not in walls]
+      enemy_territory = [(float(x), float(y)) for x in range(1, width // 2)
+                         for y in range(1, height)
+                         if (x, y) not in walls]
 
     # 7. Evaluate distance to visible Pacmen on our side
     #    If an enemy is on our side, we want to be close enough to eat them if we're not scared.
@@ -447,6 +476,18 @@ class defendingAgent(Agents):
         if enemy.numCarrying > 0 and not we_are_scared:
             inv_enemy_dist_total += W_ENEMY_CARRY_BONUS * float(enemy.numCarrying)
 
+    if my_pos in enemy_territory:
+      pos_penalty = 1000
+    else:
+      pos_penalty = - 100
+
+    enemy_penalty = 0
+    for enemy in visible_enemy_pacmen:
+        enemy_pos = enemy.getPosition()
+        if enemy_pos in home_territory:
+          enemy_penalty = 1000
+        else: enemy_penalty = -100
+
     # 8. Capsule protection
     #    We may want to be near capsules on our side so that enemy Pacmen can’t easily grab them.
     #    The idea: The closer we are to our capsules, the better we can defend them.
@@ -462,6 +503,8 @@ class defendingAgent(Agents):
     evaluation += game_score
     evaluation += inv_enemy_dist_total
     evaluation += capsule_guard_value
+    evaluation -= enemy_penalty
+    evaluation -= pos_penalty
 
     return evaluation
 
