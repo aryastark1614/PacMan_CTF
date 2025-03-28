@@ -1,7 +1,5 @@
 import math
 import random
-
-# Import AgentRules to get legal actions and apply actions
 from capture import AgentRules
 
 

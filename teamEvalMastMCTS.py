@@ -1,4 +1,4 @@
-# teamTristan.py
+# teamEvalMastMCTS.py
 # ---------
 # Licensing Information:  You are free to use or extend these projects for
 # educational purposes provided that (1) you do not distribute or publish
@@ -90,6 +90,7 @@ class Agents(CaptureAgent):
     self.me = self.index
     self.mate = self.getTeam(gameState)[1] if self.getTeam(gameState)[0] == self.index else self.getTeam(gameState)[0]
     self.max_food_carry = 3
+    self.mast_stats = {}
 
   def get_index(self, start = 0, n = 4):
     while True:
@@ -126,6 +127,57 @@ class Agents(CaptureAgent):
       self.current_root = mcts.MCTSNode(gameState, None, None, 1, self.index)
       self.state_hash_mapping[new_state_hash] = self.current_root
 
+  def select_action_mast(self, legal_actions, exploration_rate=0.2):
+    if random.random() < exploration_rate:
+      return random.choice(legal_actions)
+
+    action_scores = {}
+    for action in legal_actions:
+      if action in self.mast_stats and self.mast_stats[action]['count'] > 0:
+        total_reward = self.mast_stats[action]['total']
+        action_count = self.mast_stats[action]['count']
+        normalized_score = total_reward / (action_count + 1)
+        action_scores[action] = normalized_score
+      else:
+        action_scores[action] = 0
+
+    if action_scores:
+      max_score = max(action_scores.values())
+      best_actions = [
+        action for action, score in action_scores.items()
+        if math.isclose(score, max_score, rel_tol=1e-9)
+      ]
+      return random.choice(best_actions)
+
+    return random.choice(legal_actions)
+
+  def update_mast(self, simulation_actions, reward, decay_factor=0.9):
+    for action in simulation_actions:
+      if action not in self.mast_stats:
+        self.mast_stats[action] = {
+          'total': reward,
+          'count': 1,
+          'last_update': time.time()
+        }
+      else:
+        current_time = time.time()
+        time_since_update = current_time - self.mast_stats[action].get('last_update', current_time)
+        decay_multiplier = decay_factor ** time_since_update
+
+        self.mast_stats[action]['total'] = (
+                self.mast_stats[action]['total'] * decay_multiplier + reward
+        )
+        self.mast_stats[action]['count'] += 1
+        self.mast_stats[action]['last_update'] = current_time
+
+    if len(self.mast_stats) > 100:
+      sorted_actions = sorted(
+        self.mast_stats.items(),
+        key=lambda x: x[1]['count'],
+        reverse=True
+      )
+      self.mast_stats = dict(sorted_actions[:100])
+
   def traverse(self):
     while self.current_node.children:
       self.next_index(self.current_node.agentIndex)
@@ -149,19 +201,35 @@ class Agents(CaptureAgent):
           self.current_node = max(uct_values, key=uct_values.get)
 
   def simulate(self, sim_index):
+    """
+    Simulation method enhanced to work with improved MAST
+
+    Args:
+        sim_index (int): Starting agent index for simulation
+    """
     self.sim_gameState = self.current_node.state
     current_sim_index = sim_index
     current_depth = 0
+    simulation_actions = []
 
     while not self.is_terminal(self.sim_gameState) and current_depth < self.max_depth:
       actions = self.sim_gameState.getLegalActions(current_sim_index)
-      actions.remove('Stop')
+      actions = [a for a in actions if a != 'Stop']  # Remove 'Stop' action
+
       if not actions:
         break
-      action = random.choice(actions)
+
+      action = self.select_action_mast(actions)
+
+      simulation_actions.append(action)
       self.sim_gameState = self.sim_gameState.generateSuccessor(current_sim_index, action)
+
       current_sim_index = (current_sim_index + 1) % self.numberOfAgents
       current_depth += 1
+
+    reward = self.evaluate()
+
+    self.update_mast(simulation_actions, reward)
 
   def backpropagate(self, reward):
     while self.current_node.parent:

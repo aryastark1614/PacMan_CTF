@@ -300,7 +300,4 @@ class AttackingDefenderAgentBottom(CaptureAgent):
                 teammate_position = gameState.getAgentPosition(teammate)
                 score += 2 * self.getMazeDistance(position, teammate_position)
 
-    
-    
-
     return score
