@@ -34,6 +34,9 @@ def evaluate_agents(agents, num_rounds=100, log_file="elo_log.txt"):
                 )
                 
                 output = result.stdout.lower()
+                #print last line of output
+                output = output.splitlines()[-1]
+                
                 if "red team" in output:
                     winner, loser, score = agent1, agent2, 1
                 elif "blue team" in output:
