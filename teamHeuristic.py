@@ -26,20 +26,7 @@ from game import Directions
 
 def createTeam(firstIndex, secondIndex, isRed,
                first = 'AttackingDefenderAgentTop', second = 'AttackingDefenderAgentBottom'):
-  """
-  This function should return a list of two agents that will form the
-  team, initialized using firstIndex and secondIndex as their agent
-  index numbers.  isRed is True if the red team is being created, and
-  will be False if the blue team is being created.
 
-  As a potentially helpful development aid, this function can take
-  additional string-valued keyword arguments ("first" and "second" are
-  such arguments in the case of this function), which will come from
-  the --redOpts and --blueOpts command-line arguments to capture.py.
-  For the nightly contest, however, your team will be created without
-  any extra arguments, so you should make sure that the default
-  behavior is what you want for the nightly contest.
-  """
 
   # The following line is an example only; feel free to change it.
   return [eval(first)(firstIndex), eval(second)(secondIndex)]
@@ -83,7 +70,6 @@ class AttackingDefenderAgentTop(CaptureAgent):
       
       reward = self.evaluate(next_state, food_carrying=sim_food_carrying)
       scores[action] += reward
-    print(scores)
     best_action = max(actions, key=lambda a: scores[a])
     
     if best_action not in actions:
@@ -91,6 +77,18 @@ class AttackingDefenderAgentTop(CaptureAgent):
     return best_action
   
   def evaluate(self, gameState, food_carrying=None):
+
+    width = gameState.data.layout.width
+    height = gameState.data.layout.height
+    walls = gameState.getWalls().asList()
+    if self.red:
+
+      boundary_positions = [(float(x), float(y)) for x in range(width // 2) for y in range(1, height) if (x, y) not in walls]
+
+    else:
+
+      boundary_positions = [(float(x), float(y)) for x in range(width // 2 + 1) for y in range(1, height) if
+                            (x, y) not in walls]
 
     if food_carrying is None:
         food_carrying = self.food_carrying
@@ -102,8 +100,8 @@ class AttackingDefenderAgentTop(CaptureAgent):
     
     
     if food_carrying >= self.max_food_to_carry:
-      dist_to_start = self.getMazeDistance(position, self.start)
-      return 100000-(10 * dist_to_start)
+      closest_boundary_dist = min(self.distancer.getDistance(position, b) for b in boundary_positions)
+      return 100000-(10 * closest_boundary_dist)
 
     opp = self.getOpponents(gameState)
     enemies = [gameState.getAgentPosition(i) for i in opp]
@@ -145,7 +143,6 @@ class AttackingDefenderAgentTop(CaptureAgent):
         closest_enemy_to_capsule = min(self.getMazeDistance(capsule, enemy) for enemy in enemies)
         distance_to_capsule = self.getMazeDistance(position, capsule)
         if distance_to_capsule < closest_enemy_to_capsule:
-            print("CLOSE TO CAPSULE")
             return 10000 - ( 10 * distance_to_capsule)
         
         
@@ -153,7 +150,6 @@ class AttackingDefenderAgentTop(CaptureAgent):
     closest_enemy_to_closest_food = min(self.getMazeDistance(closest_food, enemy) for enemy in enemies)
     distance_to_closest_food = self.getMazeDistance(position, closest_food)
     if 2 * distance_to_closest_food < closest_enemy_to_closest_food or gameState.getAgentState(((self.index + 1) % 4)).scaredTimer > 0:
-      print("CLOSE TO FOOD")
       return 5000 - (10 * distance_to_closest_food)
     
     
@@ -210,7 +206,6 @@ class AttackingDefenderAgentBottom(CaptureAgent):
           
       reward = self.evaluate(next_state, food_carrying=sim_food_carrying)
       scores[action] += reward
-    print(scores)
     best_action = max(actions, key=lambda a: scores[a])
     
     if best_action not in actions:
@@ -218,6 +213,18 @@ class AttackingDefenderAgentBottom(CaptureAgent):
     return best_action
   
   def evaluate(self, gameState, food_carrying=None):
+
+    width = gameState.data.layout.width
+    height = gameState.data.layout.height
+    walls = gameState.getWalls().asList()
+    if self.red:
+
+      boundary_positions = [(float(x), float(y)) for x in range(width // 2) for y in range(1, height) if (x, y) not in walls]
+
+    else:
+
+      boundary_positions = [(float(x), float(y)) for x in range(width // 2 + 1) for y in range(1, height) if
+                            (x, y) not in walls]
 
     if food_carrying is None:
         food_carrying = self.food_carrying
@@ -229,8 +236,8 @@ class AttackingDefenderAgentBottom(CaptureAgent):
     
     
     if food_carrying >= self.max_food_to_carry:
-      dist_to_start = self.getMazeDistance(position, self.start)
-      return 1000 - (dist_to_start)
+      closest_boundary_dist = min(self.distancer.getDistance(position, b) for b in boundary_positions)
+      return 100000-(10 * closest_boundary_dist)
 
     opp = self.getOpponents(gameState)
     enemies = [gameState.getAgentPosition(i) for i in opp]
@@ -271,7 +278,6 @@ class AttackingDefenderAgentBottom(CaptureAgent):
         closest_enemy_to_capsule = min(self.getMazeDistance(capsule, enemy) for enemy in enemies)
         distance_to_capsule = self.getMazeDistance(position, capsule)
         if distance_to_capsule < closest_enemy_to_capsule:
-            print("CLOSE TO CAPSULE")
             return 10000 - ( 10 * distance_to_capsule)
         
         
@@ -279,7 +285,6 @@ class AttackingDefenderAgentBottom(CaptureAgent):
     closest_enemy_to_closest_food = min(self.getMazeDistance(closest_food, enemy) for enemy in enemies)
     distance_to_closest_food = self.getMazeDistance(position, closest_food)
     if 2 * distance_to_closest_food < closest_enemy_to_closest_food or gameState.getAgentState(((self.index + 1) % 4)).scaredTimer > 0:
-      print("CLOSE TO FOOD")
       return 5000 - (10 * distance_to_closest_food)
             
             
