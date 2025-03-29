@@ -111,21 +111,22 @@ class AttackingDefenderAgentTop(CaptureAgent):
     enemies = [gameState.getAgentPosition(i) for i in opp]
     enemy_pacmans = [en for en in opp if gameState.getAgentState(en).isPacman]
     
+    map_width = gameState.data.layout.width
 
     for en in self.getOpponents(gameState):
       if self.red:
-        if gameState.getAgentPosition(en)[0] == 30 and position[0] != 1:
+        if gameState.getAgentPosition(en)[0] == map_width - 2 and position[0] != 1:
           score += 1000
       else:
-        if gameState.getAgentPosition(en)[0] == 1 and position[0] != 30:
+        if gameState.getAgentPosition(en)[0] == 1 and position[0] != map_width - 2:
           score += 1000
           
     for en in self.getOpponents(gameState):
       if self.red:
-        if gameState.getAgentPosition(en)[0] != 30 and position[0] == 1:
+        if gameState.getAgentPosition(en)[0] != map_width - 2 and position[0] == 1:
           score -= 1000
       else:
-        if gameState.getAgentPosition(en)[0] != 1 and position[0] == 30:
+        if gameState.getAgentPosition(en)[0] != 1 and position[0] == map_width - 2:
           score -= 1000
           
     if enemy_pacmans and gameState.getAgentState(self.index).scaredTimer == 0:
@@ -167,11 +168,7 @@ class AttackingDefenderAgentTop(CaptureAgent):
     for teammate_position in teammate_positions:
         for enemy_position in enemies_positions:
             if self.getMazeDistance(teammate_position, enemy_position) == 1:
-                #Try to have one agent go to the other side of the board
-                get_teammate = self.getTeam(gameState)
-                teammate = get_teammate[0] if get_teammate[0] != self.index else get_teammate[1]
-                teammate_position = gameState.getAgentPosition(teammate)
-                score += 0.5 * self.getMazeDistance(position, teammate_position)
+                return 10000 - (10 * distance_to_closest_food)
     
     
     
@@ -198,7 +195,7 @@ class AttackingDefenderAgentBottom(CaptureAgent):
       self.food_carrying = 0
     
     actions = gameState.getLegalActions(self.index)
-
+    actions.remove(Directions.STOP)
     scores = {action: 0 for action in actions}
 
 
@@ -241,23 +238,24 @@ class AttackingDefenderAgentBottom(CaptureAgent):
     opp = self.getOpponents(gameState)
     enemies = [gameState.getAgentPosition(i) for i in opp]
     enemy_pacmans = [en for en in opp if gameState.getAgentState(en).isPacman]
-
+    map_width = gameState.data.layout.width
+    
     for en in self.getOpponents(gameState):
       if self.red:
-        if gameState.getAgentPosition(en)[0] == 30 and position[0] != 1:
+        if gameState.getAgentPosition(en)[0] == map_width - 2 and position[0] != 1:
           score += 1000
       else:
-        if gameState.getAgentPosition(en)[0] == 1 and position[0] != 30:
+        if gameState.getAgentPosition(en)[0] == 1 and position[0] != map_width - 2:
           score += 1000
           
     for en in self.getOpponents(gameState):
       if self.red:
-        if gameState.getAgentPosition(en)[0] != 30 and position[0] == 1:
+        if gameState.getAgentPosition(en)[0] != map_width - 2 and position[0] == 1:
           score -= 1000
       else:
-        if gameState.getAgentPosition(en)[0] != 1 and position[0] == 30:
+        if gameState.getAgentPosition(en)[0] != 1 and position[0] == map_width - 2:
           score -= 1000
-    print(f"ScaredTimer self: {gameState.getAgentState(self.index).scaredTimer}")
+          
     if enemy_pacmans and gameState.getAgentState(self.index).scaredTimer == 0:
       closest_pacman = min(enemy_pacmans, key=lambda ep: self.getMazeDistance(position, gameState.getAgentPosition(ep)))
       distance_to_pacman = self.getMazeDistance(position, gameState.getAgentPosition(closest_pacman))
@@ -298,7 +296,7 @@ class AttackingDefenderAgentBottom(CaptureAgent):
                 get_teammate = self.getTeam(gameState)
                 teammate = get_teammate[0] if get_teammate[0] != self.index else get_teammate[1]
                 teammate_position = gameState.getAgentPosition(teammate)
-                score += 2 * self.getMazeDistance(position, teammate_position)
+                score += 0.4 * self.getMazeDistance(position, teammate_position)
 
     
     
