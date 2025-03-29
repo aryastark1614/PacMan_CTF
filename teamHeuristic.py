@@ -134,7 +134,7 @@ class AttackingDefenderAgentTop(CaptureAgent):
 
     else:
       closest_enemy = min(self.getMazeDistance(position, enemy) for enemy in enemies)
-      score += 50 - closest_enemy
+      score += 100 - closest_enemy
     
     if gameState.getAgentState(self.index).isPacman:
       score -= 10
@@ -154,7 +154,7 @@ class AttackingDefenderAgentTop(CaptureAgent):
     distance_to_closest_food = self.getMazeDistance(position, closest_food)
     if 2 * distance_to_closest_food < closest_enemy_to_closest_food or gameState.getAgentState(((self.index + 1) % 4)).scaredTimer > 0:
       print("CLOSE TO FOOD")
-      return 10000 - (10 * distance_to_closest_food)
+      return 5000 - (10 * distance_to_closest_food)
     
     
             
@@ -280,7 +280,7 @@ class AttackingDefenderAgentBottom(CaptureAgent):
     distance_to_closest_food = self.getMazeDistance(position, closest_food)
     if 2 * distance_to_closest_food < closest_enemy_to_closest_food or gameState.getAgentState(((self.index + 1) % 4)).scaredTimer > 0:
       print("CLOSE TO FOOD")
-      return 10000 - (10 * distance_to_closest_food)
+      return 5000 - (10 * distance_to_closest_food)
             
             
     #Check if teammate is one away from enemy, if so, go away from teammate
